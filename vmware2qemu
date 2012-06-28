@@ -1,0 +1,37 @@
+#!/bin/bash
+
+if [ ! -f "$1" ]; then
+	echo "USAGE: $0 file.vmx"
+	exit -1
+fi
+
+VMX="$1"
+
+VMDK=$(cat "$VMX" | tr -d '\015"' | awk -F " = " '{ if ($1 == "scsi0:0.fileName") print $2;}')
+if [ -z "$VMDK" ]; then
+	VMDK=$(cat "$VMX" | tr -d '\015"' | awk -F " = " '{ if ($1 == "ide0:0.fileName") print $2;}')
+fi
+QCOW=$(basename $VMDK vmdk)qcow2
+echo Converting disk image...
+
+ionice -c 3 qemu-img convert -O qcow2 "$VMDK" "$QCOW" || exit -1
+
+echo Creating startup script...
+
+MAC=$(cat "$VMX" | tr -d '\015"' | awk -F " = " '{ if ($1 == "ethernet0.generatedAddress") print $2;}')
+UUID=$(cat "$VMX" | tr -d '\015" -' | awk -F "=" '{ if ($1 == "uuid.bios") print $2;}')
+MEM=$(cat "$VMX" | tr -d '\015"' | awk -F " = " '{ if ($1 == "memsize") print $2;}')
+
+UUID=${UUID:0:8}-${UUID:8:4}-${UUID:12:4}-${UUID:16:4}-${UUID:20:12}
+
+SCRIPT=$(basename $VMDK vmdk)sh
+
+cat << EOF > "$SCRIPT"
+#!/bin/bash
+
+ qemu -m $MEM -drive file="$QCOW" -net nic,macaddr=$MAC -uuid $UUID
+EOF
+
+chmod +x "$SCRIPT"
+
+echo done.
